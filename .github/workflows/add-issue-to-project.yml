@@ -14,7 +14,6 @@ jobs:
           project-location: 'Kanban ES2'
           project-number: 1
           column-name: 'To do'
-          content-id: ${{ github.event.issue.node_id }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  
 
