@@ -1,80 +1,82 @@
 FIELDS = ("age", "income", "country")
-_ABSENT = object()
 
 
-def _err(field, code):
+def _error(field, code):
     return {"field": field, "code": code}
 
 
-def _is_map(obj):
-    # dict ou qualquer coisa que se comporte como dict (sem precisar de import)
-    return hasattr(obj, "keys") and hasattr(obj, "__getitem__") and not isinstance(obj, (str, bytes))
+def _fail(request_id, errors):
+    return {"ok": False, "request_id": request_id, "errors": errors}
 
 
-def _get(obj, key):
-    """Lê uma chave de um mapa ou um atributo de um objeto."""
-    if _is_map(obj):
-        return obj[key] if key in obj else _ABSENT
-    return getattr(obj, key, _ABSENT)
+def _as_dict(obj):
+    """Converte dict (ou parecido) ou objeto com atributos em um dict novo. Senão, None."""
+    if isinstance(obj, (str, bytes)):
+        return None
+    if hasattr(obj, "keys"):
+        return dict(obj)
+    if hasattr(obj, "__dict__"):
+        return dict(vars(obj))
+    return None
 
 
-def _check(name, v):
-    """Valida um campo presente. Devolve (valor_normalizado, codigo_de_erro)."""
-    if v is None:
-        return None, "null"
+def _field_error(name, value):
+    """Devolve o código de erro do campo, ou None se ele for válido."""
+    if value is None:
+        return "null"
     if name == "country":
-        if not isinstance(v, str):
-            return None, "invalid_type"
-        v = v.strip().upper()
-        return (v, None) if v else (None, "empty")
-    # age só aceita int; income aceita int ou float. bool nunca é número aqui.
-    if isinstance(v, bool) or not isinstance(v, int if name == "age" else (int, float)):
-        return None, "invalid_type"
-    # para float: v - v dá 0 se for finito, e NaN se for inf/-inf/NaN
-    if isinstance(v, float) and not (v - v == 0):
-        return None, "not_finite"
-    if v < 0 or (name == "age" and v > 120):
-        return None, "out_of_range"
-    return v, None
+        if not isinstance(value, str):
+            return "invalid_type"
+        return "empty" if not value.strip() else None
+    # age: só int. income: int ou float. bool nunca vale como número.
+    allowed = int if name == "age" else (int, float)
+    if isinstance(value, bool) or not isinstance(value, allowed):
+        return "invalid_type"
+    if value != value or value in (float("inf"), float("-inf")):  # NaN, inf, -inf
+        return "not_finite"
+    if value < 0 or (name == "age" and value > 120):
+        return "out_of_range"
+    return None
+
+
+def _validate(request):
+    req = _as_dict(request)
+    if req is None:
+        return _fail(None, [_error("request", "invalid_type")])
+
+    request_id = req.get("request_id")  # repassado sem validar
+
+    if "features" not in req:
+        return _fail(request_id, [_error("features", "missing")])
+    if req["features"] is None:
+        return _fail(request_id, [_error("features", "null")])
+    features = _as_dict(req["features"])
+    if features is None:
+        return _fail(request_id, [_error("features", "invalid_type")])
+
+    errors, out = [], {}
+    for name in FIELDS:
+        field = "features." + name
+        code = "missing" if name not in features else _field_error(name, features[name])
+        if code:
+            errors.append(_error(field, code))
+            continue
+        value = features[name]
+        out[name] = value.strip().upper() if name == "country" else value
+        # menor de 16 anos precisa ter income 0 (só se age e income forem válidos)
+        if name == "income" and "age" in out and out["age"] < 16 and value != 0:
+            errors.append(_error(field, "consistency"))
+
+    for key in sorted(str(k) for k in features if k not in FIELDS):
+        errors.append(_error("features." + key, "unknown_field"))
+
+    if errors:
+        return _fail(request_id, errors)
+    return {"ok": True, "request_id": request_id, "features": out}
 
 
 def validate_normalize_request(request):
-    rid = None
     try:
-        # aceita mapa ou objeto com atributos; None, lista, string, número = inválido
-        if request is None or isinstance(request, (str, bytes, list, tuple, set, int, float)):
-            return {"ok": False, "request_id": None, "errors": [_err("request", "invalid_type")]}
-        rid = _get(request, "request_id")
-        rid = None if rid is _ABSENT else rid
-        f = _get(request, "features")
-
-        if f is _ABSENT:
-            errors = [_err("features", "missing")]
-        elif f is None:
-            errors = [_err("features", "null")]
-        elif not _is_map(f):
-            errors = [_err("features", "invalid_type")]
-        else:
-            errors, out = [], {}
-            for name in FIELDS:
-                field = "features." + name
-                if name not in f:
-                    errors.append(_err(field, "missing"))
-                    continue
-                value, code = _check(name, f[name])
-                if code:
-                    errors.append(_err(field, code))
-                    continue
-                out[name] = value
-                # regra entre campos: só com age e income válidos, na posição de income
-                if name == "income" and "age" in out and out["age"] < 16 and value != 0:
-                    errors.append(_err(field, "consistency"))
-
-            unknown = sorted((k for k in f.keys() if k not in FIELDS), key=lambda k: (type(k).__name__, str(k)))
-            errors += [_err("features." + str(k), "unknown_field") for k in unknown]
-            if not errors:
-                return {"ok": True, "request_id": rid, "features": out}
-
-        return {"ok": False, "request_id": rid, "errors": errors}
-    except Exception:  # nunca lança exceção
-        return {"ok": False, "request_id": rid, "errors": [_err("request", "invalid_type")]}
+        return _validate(request)
+    except Exception:  # a função nunca lança exceção
+        return _fail(None, [_error("request", "invalid_type")])
