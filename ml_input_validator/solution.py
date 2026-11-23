@@ -1,10 +1,19 @@
 import math
+from collections.abc import Mapping
 
 FIELDS = ("age", "income", "country")
+_ABSENT = object()
 
 
 def _err(field, code):
     return {"field": field, "code": code}
+
+
+def _get(obj, key):
+    """Lê uma chave de um mapa (dict, MappingProxy, ...) ou atributo de um objeto."""
+    if isinstance(obj, Mapping):
+        return obj.get(key, _ABSENT)
+    return getattr(obj, key, _ABSENT)
 
 
 def _check(name, v):
@@ -29,18 +38,21 @@ def _check(name, v):
 def validate_normalize_request(request):
     rid = None
     try:
-        if not isinstance(request, dict):
+        # aceita mapa ou objeto com atributos; None, lista, string, número = inválido
+        if request is None or isinstance(request, (str, bytes, list, tuple, set, int, float)):
             return {"ok": False, "request_id": None, "errors": [_err("request", "invalid_type")]}
-        rid = request.get("request_id")
+        rid = _get(request, "request_id")
+        rid = None if rid is _ABSENT else rid
+        f = _get(request, "features")
 
-        if "features" not in request:
+        if f is _ABSENT:
             errors = [_err("features", "missing")]
-        elif request["features"] is None:
+        elif f is None:
             errors = [_err("features", "null")]
-        elif not isinstance(request["features"], dict):
+        elif not isinstance(f, Mapping):
             errors = [_err("features", "invalid_type")]
         else:
-            f, errors, out = request["features"], [], {}
+            errors, out = [], {}
             for name in FIELDS:
                 field = "features." + name
                 if name not in f:

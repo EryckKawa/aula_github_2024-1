@@ -146,3 +146,35 @@ def test_nao_modifica_entrada_e_deterministico():
     a, b = v(entrada), v(entrada)
     assert entrada == original
     assert a == b
+
+
+# --- Os 5 casos do enunciado, com a requisição em vários formatos ---------------
+
+from types import MappingProxyType, SimpleNamespace
+from collections import UserDict
+
+FORMATOS = {
+    "dict": lambda rid, f: {"request_id": rid, "features": f},
+    "mappingproxy": lambda rid, f: MappingProxyType({"request_id": rid, "features": MappingProxyType(f)}),
+    "userdict": lambda rid, f: UserDict({"request_id": rid, "features": UserDict(f)}),
+    "objeto": lambda rid, f: SimpleNamespace(request_id=rid, features=f),
+}
+
+CASOS = [
+    ("R1", {"age": 34, "income": 2500.5, "country": " br "},
+     {"ok": True, "request_id": "R1", "features": {"age": 34, "income": 2500.5, "country": "BR"}}),
+    ("R2", {"age": 130, "income": 10, "country": "BR"},
+     {"ok": False, "request_id": "R2", "errors": [{"field": "features.age", "code": "out_of_range"}]}),
+    ("R3", {"age": 30, "income": float("inf"), "country": "BR"},
+     {"ok": False, "request_id": "R3", "errors": [{"field": "features.income", "code": "not_finite"}]}),
+    ("R4", {"age": 30, "income": 10, "country": "BR", "device": "ios"},
+     {"ok": False, "request_id": "R4", "errors": [{"field": "features.device", "code": "unknown_field"}]}),
+    ("R5", {"age": 15, "income": 100, "country": "BR"},
+     {"ok": False, "request_id": "R5", "errors": [{"field": "features.income", "code": "consistency"}]}),
+]
+
+
+@pytest.mark.parametrize("formato", FORMATOS)
+@pytest.mark.parametrize("rid,features,esperado", CASOS)
+def test_casos_do_enunciado(formato, rid, features, esperado):
+    assert v(FORMATOS[formato](rid, features)) == esperado
