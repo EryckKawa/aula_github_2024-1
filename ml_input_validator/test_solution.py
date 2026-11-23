@@ -1,7 +1,12 @@
 import copy
 import math
+import os
+import sys
 
 import pytest
+
+# garante que o solution.py da mesma pasta seja encontrado, de onde quer que o pytest rode
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from solution import validate_normalize_request as v
 
