@@ -1,82 +1,67 @@
-FIELDS = ("age", "income", "country")
+CAMPOS = ("age", "income", "country")
 
 
-def _error(field, code):
-    return {"field": field, "code": code}
+def falha(rid, erros):
+    return {"ok": False, "request_id": rid, "errors": erros}
 
 
-def _fail(request_id, errors):
-    return {"ok": False, "request_id": request_id, "errors": errors}
+def erro(campo, codigo):
+    return {"field": campo, "code": codigo}
 
 
-def _as_dict(obj):
-    """Converte dict (ou parecido) ou objeto com atributos em um dict novo. Senão, None."""
-    if isinstance(obj, (str, bytes)):
-        return None
-    if hasattr(obj, "keys"):
-        return dict(obj)
-    if hasattr(obj, "__dict__"):
-        return dict(vars(obj))
-    return None
-
-
-def _field_error(name, value):
-    """Devolve o código de erro do campo, ou None se ele for válido."""
-    if value is None:
+def checar(nome, v):
+    if v is None:
         return "null"
-    if name == "country":
-        if not isinstance(value, str):
+    if nome == "country":
+        if type(v) != str:
             return "invalid_type"
-        return "empty" if not value.strip() else None
-    # age: só int. income: int ou float. bool nunca vale como número.
-    allowed = int if name == "age" else (int, float)
-    if isinstance(value, bool) or not isinstance(value, allowed):
+        if v.strip() == "":
+            return "empty"
+        return None
+    if nome == "age" and type(v) != int:
         return "invalid_type"
-    if value != value or value in (float("inf"), float("-inf")):  # NaN, inf, -inf
+    if type(v) not in (int, float):
+        return "invalid_type"
+    if v != v or v in (float("inf"), float("-inf")):
         return "not_finite"
-    if value < 0 or (name == "age" and value > 120):
+    if v < 0 or (nome == "age" and v > 120):
         return "out_of_range"
     return None
 
 
-def _validate(request):
-    req = _as_dict(request)
-    if req is None:
-        return _fail(None, [_error("request", "invalid_type")])
-
-    request_id = req.get("request_id")  # repassado sem validar
-
-    if "features" not in req:
-        return _fail(request_id, [_error("features", "missing")])
-    if req["features"] is None:
-        return _fail(request_id, [_error("features", "null")])
-    features = _as_dict(req["features"])
-    if features is None:
-        return _fail(request_id, [_error("features", "invalid_type")])
-
-    errors, out = [], {}
-    for name in FIELDS:
-        field = "features." + name
-        code = "missing" if name not in features else _field_error(name, features[name])
-        if code:
-            errors.append(_error(field, code))
-            continue
-        value = features[name]
-        out[name] = value.strip().upper() if name == "country" else value
-        # menor de 16 anos precisa ter income 0 (só se age e income forem válidos)
-        if name == "income" and "age" in out and out["age"] < 16 and value != 0:
-            errors.append(_error(field, "consistency"))
-
-    for key in sorted(str(k) for k in features if k not in FIELDS):
-        errors.append(_error("features." + key, "unknown_field"))
-
-    if errors:
-        return _fail(request_id, errors)
-    return {"ok": True, "request_id": request_id, "features": out}
-
-
 def validate_and_normalize(request):
+    rid = None
     try:
-        return _validate(request)
-    except Exception:  # a função nunca lança exceção
-        return _fail(None, [_error("request", "invalid_type")])
+        rid = request.get("request_id")
+        if "features" not in request:
+            return falha(rid, [erro("features", "missing")])
+        f = request["features"]
+        if f is None:
+            return falha(rid, [erro("features", "null")])
+        if type(f) != dict:
+            return falha(rid, [erro("features", "invalid_type")])
+        erros = []
+        out = {}
+        for nome in CAMPOS:
+            campo = "features." + nome
+            if nome not in f:
+                erros.append(erro(campo, "missing"))
+                continue
+            cod = checar(nome, f[nome])
+            if cod:
+                erros.append(erro(campo, cod))
+                continue
+            out[nome] = f[nome]
+            if nome == "country":
+                out[nome] = f[nome].strip().upper()
+            if nome == "income" and "age" in out:
+                if out["age"] < 16 and f[nome] != 0:
+                    erros.append(erro(campo, "consistency"))
+        for k in f:
+            if k not in CAMPOS:
+                erros.append(erro("features." + str(k), "unknown_field"))
+        if erros:
+            return falha(rid, erros)
+        return {"ok": True, "request_id": rid, "features": out}
+    except Exception:
+        return falha(rid, [erro("request", "invalid_type")])
