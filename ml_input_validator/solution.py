@@ -1,6 +1,3 @@
-import math
-from collections.abc import Mapping
-
 FIELDS = ("age", "income", "country")
 _ABSENT = object()
 
@@ -9,10 +6,15 @@ def _err(field, code):
     return {"field": field, "code": code}
 
 
+def _is_map(obj):
+    # dict ou qualquer coisa que se comporte como dict (sem precisar de import)
+    return hasattr(obj, "keys") and hasattr(obj, "__getitem__") and not isinstance(obj, (str, bytes))
+
+
 def _get(obj, key):
-    """Lê uma chave de um mapa (dict, MappingProxy, ...) ou atributo de um objeto."""
-    if isinstance(obj, Mapping):
-        return obj.get(key, _ABSENT)
+    """Lê uma chave de um mapa ou um atributo de um objeto."""
+    if _is_map(obj):
+        return obj[key] if key in obj else _ABSENT
     return getattr(obj, key, _ABSENT)
 
 
@@ -28,7 +30,8 @@ def _check(name, v):
     # age só aceita int; income aceita int ou float. bool nunca é número aqui.
     if isinstance(v, bool) or not isinstance(v, int if name == "age" else (int, float)):
         return None, "invalid_type"
-    if isinstance(v, float) and not math.isfinite(v):
+    # para float: v - v dá 0 se for finito, e NaN se for inf/-inf/NaN
+    if isinstance(v, float) and not (v - v == 0):
         return None, "not_finite"
     if v < 0 or (name == "age" and v > 120):
         return None, "out_of_range"
@@ -49,7 +52,7 @@ def validate_normalize_request(request):
             errors = [_err("features", "missing")]
         elif f is None:
             errors = [_err("features", "null")]
-        elif not isinstance(f, Mapping):
+        elif not _is_map(f):
             errors = [_err("features", "invalid_type")]
         else:
             errors, out = [], {}
@@ -67,8 +70,8 @@ def validate_normalize_request(request):
                 if name == "income" and "age" in out and out["age"] < 16 and value != 0:
                     errors.append(_err(field, "consistency"))
 
-            unknown = sorted((k for k in f if k not in FIELDS), key=lambda k: (type(k).__name__, str(k)))
-            errors += [_err(f"features.{k}", "unknown_field") for k in unknown]
+            unknown = sorted((k for k in f.keys() if k not in FIELDS), key=lambda k: (type(k).__name__, str(k)))
+            errors += [_err("features." + str(k), "unknown_field") for k in unknown]
             if not errors:
                 return {"ok": True, "request_id": rid, "features": out}
 
