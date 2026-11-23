@@ -1,5 +1,4 @@
 FIELDS = ("age", "income", "country")
-DEBUG = True  # mude para False quando os testes passarem
 
 
 def _error(field, code):
@@ -117,12 +116,13 @@ def _validate(request):
     return {"ok": True, "request_id": request_id, "features": out}
 
 
-def validate_normalize_request(request):
+def validate_and_normalize(request):
+    # Funcao chamada pelos testes. Nunca lanca excecao.
     try:
-        result = _validate(request)
+        return _validate(request)
     except Exception:
-        result = _bad_request()
-    if DEBUG and not result["ok"]:
-        tipo = type(request).__name__
-        print("DEBUG tipo:", tipo, "| erros:", result["errors"])
-    return result
+        return _bad_request()
+
+
+# mesmo funcao com o outro nome, por garantia
+validate_normalize_request = validate_and_normalize

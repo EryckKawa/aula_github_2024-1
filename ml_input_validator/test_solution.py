@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from solution import validate_normalize_request
+from solution import validate_and_normalize as validate_normalize_request
 
 
 def test_r1_sucesso_country_normalizado():
