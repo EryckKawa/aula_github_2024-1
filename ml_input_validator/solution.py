@@ -10,12 +10,24 @@ def _fail(request_id, errors):
 
 
 def _as_dict(obj):
-    """Converte dict (ou parecido) ou objeto com atributos em um dict novo. Senão, None."""
-    if isinstance(obj, (str, bytes)):
-        return None
-    if hasattr(obj, "keys"):
+    """Converte a entrada em um dict novo (a original nunca é alterada). Se não der, None.
+
+    Aceita: dict (ou parecido), texto JSON de um objeto, namedtuple,
+    dataclass (inclusive com slots) e objeto com atributos.
+    """
+    if isinstance(obj, bytes):
+        obj = obj.decode("utf-8")
+    if isinstance(obj, str):  # texto JSON, ex.: '{"request_id": "r1", ...}'
+        import json
+        obj = json.loads(obj)
+        return obj if isinstance(obj, dict) else None
+    if hasattr(obj, "keys"):  # dict, MappingProxy, UserDict...
         return dict(obj)
-    if hasattr(obj, "__dict__"):
+    if hasattr(obj, "_asdict"):  # namedtuple
+        return dict(obj._asdict())
+    if hasattr(obj, "__dataclass_fields__"):  # dataclass (com ou sem slots)
+        return {k: getattr(obj, k) for k in obj.__dataclass_fields__}
+    if hasattr(obj, "__dict__"):  # objeto comum com atributos
         return dict(vars(obj))
     return None
 
@@ -40,7 +52,10 @@ def _field_error(name, value):
 
 
 def _validate(request):
-    req = _as_dict(request)
+    try:
+        req = _as_dict(request)
+    except Exception:  # ex.: texto que não é JSON
+        req = None
     if req is None:
         return _fail(None, [_error("request", "invalid_type")])
 
@@ -50,7 +65,10 @@ def _validate(request):
         return _fail(request_id, [_error("features", "missing")])
     if req["features"] is None:
         return _fail(request_id, [_error("features", "null")])
-    features = _as_dict(req["features"])
+    try:
+        features = _as_dict(req["features"])
+    except Exception:
+        features = None
     if features is None:
         return _fail(request_id, [_error("features", "invalid_type")])
 
@@ -75,8 +93,15 @@ def _validate(request):
     return {"ok": True, "request_id": request_id, "features": out}
 
 
+DEBUG = True  # mude para False quando os testes passarem
+
+
 def validate_normalize_request(request):
     try:
-        return _validate(request)
+        result = _validate(request)
     except Exception:  # a função nunca lança exceção
-        return _fail(None, [_error("request", "invalid_type")])
+        result = _fail(None, [_error("request", "invalid_type")])
+    if DEBUG and not result["ok"]:
+        # o pytest mostra isso em "Captured stdout" quando um teste falha
+        print("DEBUG tipo recebido:", type(request).__name__, "| erros:", result["errors"])
+    return result
