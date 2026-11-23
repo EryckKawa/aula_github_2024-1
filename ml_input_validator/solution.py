@@ -124,5 +124,5 @@ def validate_and_normalize(request):
         return _bad_request()
 
 
-# mesmo funcao com o outro nome, por garantia
+# a mesma funcao com o outro nome, por garantia
 validate_normalize_request = validate_and_normalize
